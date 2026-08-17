@@ -1,0 +1,11 @@
+name: ima-agent
+channels:
+  - conda-forge
+variables:
+  PYTHONNOUSERSITE: "1"
+dependencies:
+  - python=3.12
+  - pip>=25.1
+  - nodejs=22
+  - pip:
+      - -e ./backend[dev]
