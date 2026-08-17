@@ -1,0 +1,65 @@
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: industrial_agents
+      MYSQL_USER: ima
+      MYSQL_PASSWORD: ima_dev_password
+      MYSQL_ROOT_PASSWORD: root_dev_password
+    ports: ["3306:3306"]
+    volumes: ["mysql-data:/var/lib/mysql"]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-proot_dev_password"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis/redis-stack-server:7.4.0-v3
+    ports: ["6379:6379"]
+    volumes: ["redis-data:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      dockerfile: deploy/backend.Dockerfile
+    environment: &backend-env
+      IMA_ENVIRONMENT: production
+      IMA_DATABASE_URL: mysql+asyncmy://ima:ima_dev_password@mysql:3306/industrial_agents
+      IMA_REDIS_URL: redis://redis:6379/0
+      IMA_EXECUTION_MODE: redis
+      IMA_RAG_MODE: fake
+      IMA_JWT_SECRET: compose-demo-secret-replace-before-real-deployment
+      IMA_CORS_ORIGINS: '["http://localhost:5173","http://localhost:8088"]'
+    command: ["uvicorn", "industrial_agents.web.app:app", "--host", "0.0.0.0", "--port", "8080"]
+    ports: ["8080:8080"]
+    depends_on:
+      mysql: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  worker:
+    build:
+      context: .
+      dockerfile: deploy/backend.Dockerfile
+    environment: *backend-env
+    command: ["python", "-m", "industrial_agents.worker"]
+    depends_on:
+      mysql: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  frontend:
+    build:
+      context: .
+      dockerfile: deploy/frontend.Dockerfile
+    ports: ["8088:80"]
+    depends_on: [api]
+
+volumes:
+  mysql-data:
+  redis-data:
+
