@@ -35,8 +35,8 @@ function useCustomer() {
     <div class="login-grid" aria-hidden="true"></div>
     <section class="login-manifesto">
       <span class="eyebrow"><Orbit :size="14" /> 注塑设备智能运维平台</span>
-      <h1>设备状态、诊断<br />与运行记录，<br /><em>集中管理。</em></h1>
-      <p>面向注塑设备的运行监测与辅助诊断平台，帮助工程人员统一查看趋势、报警、诊断证据和维护记录。</p>
+      <h1>让每一次<br /><em>停机之前</em><br />都有迹可循。</h1>
+      <p>面向注塑设备的可追溯智能诊断。机器趋势、工程经验与知识凭证，在每个受控工作流中汇合。</p>
       <div class="manifesto-stats">
         <span><b>04</b><small>专业分析模块</small></span>
         <span><b>00</b><small>PLC 写入操作</small></span>
