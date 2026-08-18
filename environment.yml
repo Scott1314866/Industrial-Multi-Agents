@@ -8,4 +8,4 @@ dependencies:
   - pip>=25.1
   - nodejs=22
   - pip:
-      - -e ./backend[dev]
+      - -e ./backend[dev,data]
