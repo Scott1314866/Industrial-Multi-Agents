@@ -1,4 +1,4 @@
-import type { GraphResult, Machine, MachineContext, RunRecord, User } from '@/types'
+import type { AuthSession, GraphResult, Machine, MachineContext, RunRecord, User } from '@/types'
 
 const API = '/api/v1'
 let accessToken = ''
@@ -34,6 +34,8 @@ export const api = {
   },
   me: () => request<User>('/auth/me'),
   logout: () => request<void>('/auth/logout', { method: 'POST' }),
+  authSessions: () => request<AuthSession[]>('/auth/sessions'),
+  revokeAuthSession: (id: string) => request<void>(`/auth/sessions/${id}`, { method: 'DELETE' }),
   machines: () => request<Machine[]>('/machines'),
   telemetry: (id: string) => request<MachineContext>(`/machines/${id}/telemetry`),
   ragStatus: () => request<{ status: string; mode: string }>('/rag/status'),
