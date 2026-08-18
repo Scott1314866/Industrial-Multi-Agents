@@ -8,6 +8,14 @@ export interface User {
   tenant_id: string
 }
 
+export interface AuthSession {
+  id: string
+  created_at: string
+  last_seen_at: string
+  expires_at: string
+  current: boolean
+}
+
 export interface Machine {
   id: string
   name: string
