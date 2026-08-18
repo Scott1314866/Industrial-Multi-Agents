@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import operator
 import re
+from enum import StrEnum
 from typing import Annotated, Any, Literal, TypedDict, cast
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -16,6 +17,7 @@ from industrial_agents.domain.models import (
     GraphResponse,
     MachineContext,
     RagQuery,
+    RagResult,
     Recommendation,
     RiskLevel,
     RunStatus,
@@ -23,6 +25,12 @@ from industrial_agents.domain.models import (
 from industrial_agents.domain.ports import AnswerComposer, RagGateway, TelemetryGateway
 
 AgentName = Literal["fault_diagnosis", "process_optimization", "quality_analysis", "predictive_maintenance"]
+
+
+class SafetyDecision(StrEnum):
+    ALLOW = "allow"
+    RESTRICTED = "restricted"
+    DENY = "deny"
 
 
 class GraphState(TypedDict, total=False):
@@ -38,6 +46,7 @@ class GraphState(TypedDict, total=False):
     entities: dict[str, Any]
     machine_context: dict[str, Any]
     findings: Annotated[list[dict[str, Any]], operator.add]
+    safe_findings: list[dict[str, Any]]
     evidence: list[dict[str, Any]]
     warnings: Annotated[list[str], operator.add]
     errors: Annotated[list[str], operator.add]
@@ -45,6 +54,8 @@ class GraphState(TypedDict, total=False):
     confidence: float
     answer: str
     status: str
+    safety_decision: str
+    safety_reason_codes: list[str]
 
 
 INTENT_TERMS: dict[AgentName, tuple[str, ...]] = {
@@ -163,7 +174,7 @@ class InjectionMoldingOrchestratorGraph:
             initial,
             config={"configurable": {"thread_id": request.thread_id}},
         )
-        findings = [AgentFinding.model_validate(item) for item in state.get("findings", [])]
+        findings = [AgentFinding.model_validate(item) for item in state.get("safe_findings", [])]
         evidence = [Evidence.model_validate(item) for item in state.get("evidence", [])]
         return GraphResponse(
             run_id=request.run_id,
@@ -174,6 +185,8 @@ class InjectionMoldingOrchestratorGraph:
             findings=findings,
             evidence=evidence,
             warnings=state.get("warnings", []),
+            safety_decision=state.get("safety_decision", SafetyDecision.ALLOW),
+            safety_reason_codes=state.get("safety_reason_codes", []),
         )
 
     async def _prepare(self, state: GraphState) -> GraphState:
@@ -204,12 +217,16 @@ class InjectionMoldingOrchestratorGraph:
         shared = dict(state)
         return [Send(intent, shared) for intent in state["intents"]]
 
-    async def _retrieve(self, state: GraphState, domain: str):
+    async def _retrieve(
+        self,
+        state: GraphState,
+        domain: Literal["diagnosis", "process", "quality", "maintenance"],
+    ) -> RagResult:
         context = MachineContext.model_validate(state["machine_context"])
         return await self.rag.retrieve(
             RagQuery(
                 query=state["query"],
-                knowledge_domain=domain,  # type: ignore[arg-type]
+                knowledge_domain=domain,
                 machine_model=context.model,
                 alarm_codes=list({*context.alarm_codes, *state["entities"].get("alarm_codes", [])}),
                 tenant_id=state["tenant_id"],
@@ -335,24 +352,108 @@ class InjectionMoldingOrchestratorGraph:
         }
 
     async def _safety_guard(self, state: GraphState) -> GraphState:
-        evidence = state.get("evidence", [])
-        warnings: list[str] = ["所有参数建议均需现场工程师确认，系统不会写入 PLC。"]
-        if not evidence:
-            warnings.append("未获得有效知识库证据，已隐藏具体参数调整建议并建议转人工。")
-            return {"risk_level": "high", "confidence": min(state.get("confidence", 0), 0.49), "warnings": warnings}
+        try:
+            return self._evaluate_safety(state)
+        except Exception:
+            return self._deny_output(state, ["SAFETY_GUARD_ERROR"])
+
+    def _evaluate_safety(self, state: GraphState) -> GraphState:
+        findings = [AgentFinding.model_validate(item) for item in state.get("findings", [])]
+        if not findings or any(not finding.evidence for finding in findings):
+            return self._deny_output(state, ["EVIDENCE_INSUFFICIENT"])
+
+        warnings = ["所有参数建议均需现场工程师确认，系统不会写入 PLC。"]
         if state.get("risk_level") in {"high", "critical"}:
-            warnings.append("当前风险较高：请先停机或隔离异常，完成无损检查后再恢复生产。")
-        return {"warnings": warnings}
+            safe_findings = [self._restricted_finding(item).model_dump(mode="json") for item in findings]
+            warnings.append("当前风险较高：已隐藏可执行调参步骤，请先停机或隔离异常并转授权工程师复核。")
+            return {
+                "safe_findings": safe_findings,
+                "safety_decision": SafetyDecision.RESTRICTED,
+                "safety_reason_codes": ["HIGH_RISK_REQUIRES_HUMAN"],
+                "warnings": warnings,
+            }
+
+        return {
+            "safe_findings": [item.model_dump(mode="json") for item in findings],
+            "safety_decision": SafetyDecision.ALLOW,
+            "safety_reason_codes": [],
+            "warnings": warnings,
+        }
+
+    def _deny_output(self, state: GraphState, reason_codes: list[str]) -> GraphState:
+        raw_findings = state.get("findings", [])
+        safe_findings: list[dict[str, Any]] = []
+        for raw in raw_findings:
+            try:
+                finding = AgentFinding.model_validate(raw)
+                safe_findings.append(self._denied_finding(finding).model_dump(mode="json"))
+            except Exception:
+                continue
+        return {
+            "safe_findings": safe_findings,
+            "evidence": [],
+            "risk_level": RiskLevel.HIGH,
+            "confidence": min(float(state.get("confidence", 0)), 0.49),
+            "safety_decision": SafetyDecision.DENY,
+            "safety_reason_codes": reason_codes,
+            "warnings": [
+                "安全门控未获得完整有效证据，已隐藏诊断结论、参数及操作建议。",
+                "请保存报警和停机前后趋势，由授权工程师按现场安全规程复核；系统不会写入 PLC。",
+            ],
+        }
+
+    @staticmethod
+    def _denied_finding(finding: AgentFinding) -> AgentFinding:
+        return AgentFinding(
+            agent=finding.agent,
+            status=AgentStatus.DEGRADED,
+            confidence=min(finding.confidence, 0.49),
+            risk_level=RiskLevel.HIGH,
+            diagnosis="证据不足，无法形成可执行的诊断结论。",
+            recommendations=[
+                Recommendation(
+                    title="执行现场安全处置",
+                    detail="保留报警、停机时间和趋势记录；如存在人员或设备风险，请按现场规程停机并隔离能源。",
+                    verification="联系授权工程师核验证据后，再决定是否恢复生产。",
+                )
+            ],
+            evidence=[],
+            errors=["安全门控拒绝公开原始诊断输出"],
+        )
+
+    @staticmethod
+    def _restricted_finding(finding: AgentFinding) -> AgentFinding:
+        return finding.model_copy(
+            update={
+                "recommendations": [
+                    Recommendation(
+                        title="转授权工程师复核",
+                        detail="保留当前状态和报警趋势，不自行修改工艺或设备参数；按现场规程隔离异常。",
+                        verification="由授权工程师结合引用证据和现场检查结果确认恢复条件。",
+                    )
+                ]
+            }
+        )
 
     async def _finalize(self, state: GraphState) -> GraphState:
-        findings = [AgentFinding.model_validate(item) for item in state.get("findings", [])]
+        findings = [AgentFinding.model_validate(item) for item in state.get("safe_findings", [])]
         role = state["role"]
+        decision = SafetyDecision(state.get("safety_decision", SafetyDecision.DENY))
+        if decision is SafetyDecision.DENY:
+            return {
+                "answer": (
+                    "当前知识证据不足，系统无法提供诊断结论、参数设置或操作步骤。"
+                    "请保存报警记录和停机前后趋势；如存在人员或设备风险，请按现场规程停机并隔离能源，"
+                    "随后联系授权工程师复核。"
+                ),
+                "status": "completed",
+            }
         sections = []
         for finding in findings:
             recommendations = "；".join(item.detail for item in finding.recommendations)
             sections.append(f"【{finding.agent}】{finding.diagnosis}\n建议：{recommendations}")
         answer = "\n\n".join(sections)
-        if self.composer and findings:
+        if self.composer and findings and decision is SafetyDecision.ALLOW:
             try:
                 answer = await self.composer.compose(
                     {

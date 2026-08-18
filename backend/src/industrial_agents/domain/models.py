@@ -128,6 +128,8 @@ class GraphResponse(BaseModel):
     findings: list[AgentFinding] = Field(default_factory=list)
     evidence: list[Evidence] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    safety_decision: Literal["allow", "restricted", "deny"] = Field(default="allow", exclude=True)
+    safety_reason_codes: list[str] = Field(default_factory=list, exclude=True)
 
 
 class RunEvent(BaseModel):

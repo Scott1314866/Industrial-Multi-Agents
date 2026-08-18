@@ -25,6 +25,14 @@ class UserResponse(BaseModel):
     tenant_id: str
 
 
+class AuthSessionResponse(BaseModel):
+    id: str
+    created_at: datetime
+    last_seen_at: datetime
+    expires_at: datetime
+    current: bool
+
+
 class ConversationCreate(BaseModel):
     machine_id: str = Field(min_length=3, max_length=64)
     title: str = Field(default="新诊断会话", min_length=1, max_length=200)

@@ -40,10 +40,14 @@ dev = [
   "mypy>=1.17,<2",
   "ruff>=0.12,<0.13",
 ]
+data = [
+  "pymilvus>=3,<4",
+]
 
 [project.scripts]
 ima-api = "industrial_agents.api:run"
 ima-worker = "industrial_agents.worker:run"
+ima-admin = "industrial_agents.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/industrial_agents"]

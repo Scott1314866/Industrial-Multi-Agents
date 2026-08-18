@@ -10,6 +10,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from redis.asyncio import Redis
 
 from industrial_agents.application import InjectionMoldingOrchestratorGraph
+from industrial_agents.application.machine_access import MachineAccessPolicy
 from industrial_agents.config import Settings
 from industrial_agents.domain.models import GraphRequest, RunEvent, RunStatus
 from industrial_agents.infrastructure.checkpoint import StandardRedisSaver
@@ -27,6 +28,7 @@ class Runtime:
         self.database = Database(settings.database_url)
         self.repository = Repository(self.database.sessions)
         self.telemetry = SimulatedTelemetryGateway()
+        self.machine_access = MachineAccessPolicy(self.repository, self.telemetry)
         self.rag = (
             FakeRagGateway()
             if settings.rag_mode == "fake"
@@ -152,7 +154,12 @@ class Runtime:
                 action="run.completed",
                 resource_type="run",
                 resource_id=run_id,
-                detail={"risk_level": result.risk_level, "confidence": result.confidence},
+                detail={
+                    "risk_level": result.risk_level,
+                    "confidence": result.confidence,
+                    "safety_decision": result.safety_decision,
+                    "safety_reason_codes": result.safety_reason_codes,
+                },
             )
         except Exception as exc:
             await self.repository.update_run(run_id, RunStatus.FAILED, error=type(exc).__name__)

@@ -66,7 +66,7 @@ class SimulatedTelemetryGateway:
         return MachineContext(
             machine_id=machine_id,
             model=str(scenario["model"]),
-            status=str(scenario["status"]),  # type: ignore[arg-type]
+            status=str(scenario["status"]),
             alarm_codes=alarms,
             mold_cycles=184_220 + rng.randint(0, 12_000),
             active_batch=f"B-{end:%m%d}-{machine_id[-1]}",
