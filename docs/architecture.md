@@ -33,6 +33,6 @@ flowchart LR
 1. A2A 只允许出现在 `RagGateway` seam。
 2. LLM 不接收数据库连接，也不能生成可执行 SQL。
 3. 系统只读取模拟/外部遥测，不提供 PLC 写 Interface。
-4. 无证据或安全门控失败时采用 fail-closed，不输出具体参数。
-5. 每个图调用按 `thread_id` 隔离 checkpoint，并按 `run_id` 关联事件和审计。
-
+4. 任一已调度分支无有效证据或安全门控失败时采用 fail-closed；公开答案、findings 与 evidence 均不暴露原始诊断或操作建议。高风险证据只允许受限展示并转人工。
+5. 设备访问通过显式用户授权 Module 统一校验，管理员不绕过设备授权；认证 Session 与 Refresh Token 轮换状态以 MySQL 为事实源。
+6. 每个图调用按 `thread_id` 隔离 checkpoint，并按 `run_id` 关联事件和审计。
